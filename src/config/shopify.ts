@@ -29,22 +29,10 @@ export const shopify = Shopify;
 
 export async function getShopifySession() {
   try {
-    // التحقق من وجود متغيرات البيئة
-    if (!process.env.SHOPIFY_API_KEY || !process.env.SHOPIFY_API_SECRET || !process.env.HOST) {
-      throw new Error('Missing required environment variables');
-    }
-
-    // تهيئة الجلسة
     const session = await Shopify.Utils.loadCurrentSession();
     if (!session) {
       throw new Error('No active session found');
     }
-
-    // التحقق من صحة الجلسة
-    if (!session.shop || !session.accessToken) {
-      throw new Error('Invalid session data');
-    }
-
     return session;
   } catch (error) {
     console.error('Error getting Shopify session:', error);
@@ -55,18 +43,31 @@ export async function getShopifySession() {
 export async function getProduct(productId: number) {
   try {
     const session = await getShopifySession();
-    const client = new shopify.Clients.Graphql(session.shop, session.accessToken);
-    
-    // جلب المنتج مع معلومات التخفيض
+    const client = new Shopify.GraphQL.Client({
+      accessToken: session.accessToken,
+      shopOrigin: session.shop,
+      apiVersion: ApiVersion.July22
+    });
+
     const query = `{
       product(id: "gid://shopify/Product/${productId}") {
         id
         title
-        variants(first: 1) {
+        variants(first: 10) {
           edges {
             node {
               id
               price
+              metafields(first: 10) {
+                edges {
+                  node {
+                    id
+                    namespace
+                    key
+                    value
+                  }
+                }
+              }
             }
           }
         }
@@ -77,13 +78,11 @@ export async function getProduct(productId: number) {
       }
     }`;
 
-    const response = await client.query({
-      data: query
-    });
-
-    return response.body.data.product;
+    const response = await client.query(query);
+    const data = await response.json();
+    return data.data.product;
   } catch (error) {
-    console.error('Error getting product:', error);
+    console.error('Error fetching product:', error);
     throw error;
   }
 }
@@ -91,9 +90,12 @@ export async function getProduct(productId: number) {
 export async function updateProduct(productId: number, updates: any) {
   try {
     const session = await getShopifySession();
-    const client = new shopify.Clients.Graphql(session.shop, session.accessToken);
+    const client = new Shopify.GraphQL.Client({
+      accessToken: session.accessToken,
+      shopOrigin: session.shop,
+      apiVersion: ApiVersion.July22
+    });
 
-    // تحديث المنتج مع الحفاظ على البيانات القديمة
     const query = `mutation {
       productUpdate(input: {
         id: "gid://shopify/Product/${productId}"

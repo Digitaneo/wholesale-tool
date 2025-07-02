@@ -1,17 +1,28 @@
 import { NextResponse } from "next/server";
-import { Shopify } from "@shopify/shopify-api";
+import { Shopify, ApiVersion } from "@shopify/shopify-api";
 
-export async function GET() {
+// Initialize Shopify context
+Shopify.Context.initialize({
+  apiKey: process.env.SHOPIFY_API_KEY!,
+  apiSecretKey: process.env.SHOPIFY_API_SECRET!,
+  scopes: ['read_products', 'read_customers', 'write_customers', 'read_orders', 'write_orders'],
+  hostName: process.env.HOST.replace(/https:\/\//, ''),
+  apiVersion: ApiVersion.July22,
+  isEmbeddedApp: true,
+  enableApiRateLimitProtection: true
+});
+
+export async function GET(request: Request) {
   try {
-    const session = await Shopify.Utils.loadCurrentSession();
+    const session = await Shopify.Utils.loadCurrentSession(request);
     if (!session) {
       return NextResponse.json({ error: 'No active session found' }, { status: 401 });
     }
 
-    const client = new Shopify.GraphQL({
+    const client = new Shopify.GraphQL.Client({
       accessToken: session.accessToken,
       shopOrigin: session.shop,
-      apiVersion: Shopify.Context.API_VERSION
+      apiVersion: ApiVersion.July22
     });
 
     const query = `{
@@ -44,8 +55,9 @@ export async function GET() {
     }`;
 
     const response = await client.query(query);
+    const data = await response.json();
 
-    return NextResponse.json({ products: response.data.products });
+    return NextResponse.json({ products: data.data.products });
   } catch (error) {
     console.error('Error in GET:', error);
     return NextResponse.json({ error: 'Failed to fetch products' }, { status: 500 });
@@ -54,49 +66,21 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { productId, bulkQuantity, bulkPrice } = await request.json();
-
-    const session = await Shopify.Utils.loadCurrentSession();
+    const session = await Shopify.Utils.loadCurrentSession(request);
     if (!session) {
       return NextResponse.json({ error: 'No active session found' }, { status: 401 });
     }
 
-    const client = new Shopify.GraphQL({
+    const { productId, bulkQuantity, bulkPrice } = await request.json();
+
+    const client = new Shopify.GraphQL.Client({
       accessToken: session.accessToken,
       shopOrigin: session.shop,
-      apiVersion: Shopify.Context.API_VERSION
+      apiVersion: ApiVersion.July22
     });
 
-    // أولاً، نتحقق من وجود المنتج
-    const productQuery = `{
-      product(id: "gid://shopify/Product/${productId}") {
-        id
-        variants(first: 10) {
-          edges {
-            node {
-              id
-              price
-            }
-          }
-        }
-      }
-    }`;
-
-    const productResponse = await client.query(productQuery);
-
-    if (!productResponse.data.product) {
-      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
-    }
-
-    // إنشاء أو تحديث الميتافيلد للجملة
-    const mutation = `mutation {
-      metafieldCreate(input: {
-        namespace: "wholesale",
-        key: "bulk",
-        value: "{\"bulkQuantity\": ${bulkQuantity}, \"bulkPrice\": ${bulkPrice}}",
-        type: JSON,
-        owner: ${productResponse.data.product.id}
-      }) {
+    const query = `mutation updateMetafield($input: MetafieldInput!) {
+      metafieldCreate(input: $input) {
         metafield {
           id
           namespace
@@ -110,17 +94,26 @@ export async function POST(request: Request) {
       }
     }`;
 
-    const mutationResponse = await client.query(mutation);
+    const variables = {
+      input: {
+        namespace: "wholesale",
+        key: "pricing",
+        value: JSON.stringify({ bulkQuantity, bulkPrice }),
+        ownerResource: "Product",
+        ownerId: productId
+      }
+    };
 
-    if (mutationResponse.data.metafieldCreate.userErrors.length > 0) {
-      return NextResponse.json({
-        error: mutationResponse.data.metafieldCreate.userErrors[0].message
-      }, { status: 400 });
+    const response = await client.query(query, variables);
+    const data = await response.json();
+
+    if (data.data.metafieldCreate.userErrors.length > 0) {
+      return NextResponse.json({ error: data.data.metafieldCreate.userErrors[0].message }, { status: 400 });
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error in POST:', error);
-    return NextResponse.json({ error: 'Failed to update product' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to update metafield' }, { status: 500 });
   }
 }
