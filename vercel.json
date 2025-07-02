@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "next.config.js",
+      "use": "@vercel/next"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ],
+  "env": {
+    "SHOPIFY_API_KEY": "@SHOPIFY_API_KEY",
+    "SHOPIFY_API_SECRET": "@SHOPIFY_API_SECRET",
+    "HOST": "@HOST",
+    "SCOPES": "@SCOPES",
+    "SHOPIFY_SHOP": "@SHOPIFY_SHOP",
+    "SHOPIFY_PASSWORD": "@SHOPIFY_PASSWORD"
+  }
+}
